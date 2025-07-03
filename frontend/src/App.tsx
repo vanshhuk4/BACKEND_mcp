@@ -26,7 +26,7 @@ function App() {
         const user = JSON.parse(decodeURIComponent(userData));
         console.log('✅ OAuth success, setting user:', user);
         setUser(user);
-        // Clear the success params from URL
+        // Clear the success params from URL and redirect to chat
         window.history.replaceState({}, document.title, '/chat');
       } catch (e) {
         console.error('Failed to parse user data from URL:', e);

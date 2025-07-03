@@ -15,21 +15,28 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        console.log('🔍 Checking authentication status...');
+        console.log('🔍 ProtectedRoute: Checking authentication status...');
         setIsChecking(true);
         
         const response = await authAPI.checkAuth();
-        console.log('Auth check response:', response.data);
+        console.log('✅ ProtectedRoute: Auth check response:', {
+          authenticated: response.data.authenticated,
+          userEmail: response.data.user?.email
+        });
         
         if (response.data.authenticated && response.data.user) {
-          console.log('✅ User authenticated:', response.data.user.email);
+          console.log('✅ ProtectedRoute: User authenticated:', response.data.user.email);
           setUser(response.data.user);
         } else {
-          console.log('❌ User not authenticated');
+          console.log('❌ ProtectedRoute: User not authenticated');
           setUser(null);
         }
-      } catch (error) {
-        console.error('❌ Auth check failed:', error);
+      } catch (error: any) {
+        console.error('❌ ProtectedRoute: Auth check failed:', {
+          status: error.response?.status,
+          message: error.message,
+          data: error.response?.data
+        });
         setUser(null);
       } finally {
         setIsChecking(false);
@@ -37,14 +44,9 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
       }
     };
 
-    // Only check auth if we don't already have a user
-    if (!user) {
-      checkAuth();
-    } else {
-      setIsChecking(false);
-      setLoading(false);
-    }
-  }, [setUser, setLoading, user]);
+    // Always check auth status, even if we think we have a user
+    checkAuth();
+  }, [setUser, setLoading]);
 
   // Show loading spinner while checking authentication
   if (isChecking) {
@@ -60,11 +62,11 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
 
   // Redirect to login if not authenticated
   if (!isAuthenticated || !user) {
-    console.log('🔄 Redirecting to login - not authenticated');
+    console.log('🔄 ProtectedRoute: Redirecting to login - not authenticated');
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   // Render the protected content
-  console.log('✅ Rendering protected content for:', user.email);
+  console.log('✅ ProtectedRoute: Rendering protected content for:', user.email);
   return <>{children}</>;
 };

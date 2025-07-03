@@ -37,9 +37,14 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
       }
     };
 
-    // Always check auth status when component mounts
-    checkAuth();
-  }, [setUser, setLoading]);
+    // Only check auth if we don't already have a user
+    if (!user) {
+      checkAuth();
+    } else {
+      setIsChecking(false);
+      setLoading(false);
+    }
+  }, [setUser, setLoading, user]);
 
   // Show loading spinner while checking authentication
   if (isChecking) {

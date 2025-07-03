@@ -17,7 +17,7 @@ services:
       - key: GOOGLE_CLIENT_SECRET
         sync: false
       - key: GOOGLE_REDIRECT_URI
-        sync: false
+        value: https://ai-chatbot-backend-fuzp.onrender.com/auth/google/callback
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
@@ -25,7 +25,7 @@ services:
       - key: SESSION_SECRET
         sync: false
       - key: FRONTEND_URL
-        sync: false
+        value: https://ai-chatbot-frontend-9dq0.onrender.com
       - key: PYTHON_PATH
         value: /opt/render/project/src/.venv/bin/python
 
@@ -37,7 +37,7 @@ services:
     staticPublishPath: frontend/dist
     envVars:
       - key: VITE_API_URL
-        sync: false
+        value: https://ai-chatbot-backend-fuzp.onrender.com
       - key: VITE_SUPABASE_URL
         sync: false
       - key: VITE_SUPABASE_ANON_KEY

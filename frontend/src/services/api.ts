@@ -2,20 +2,49 @@ import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
+console.log('🔗 API Base URL:', API_BASE_URL);
+
 const api = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 30000, // 30 second timeout
 });
+
+// Request interceptor for debugging
+api.interceptors.request.use(
+  (config) => {
+    console.log(`🚀 API Request: ${config.method?.toUpperCase()} ${config.url}`);
+    return config;
+  },
+  (error) => {
+    console.error('❌ API Request Error:', error);
+    return Promise.reject(error);
+  }
+);
+
+// Response interceptor for debugging
+api.interceptors.response.use(
+  (response) => {
+    console.log(`✅ API Response: ${response.status} ${response.config.url}`);
+    return response;
+  },
+  (error) => {
+    console.error('❌ API Response Error:', error.response?.status, error.response?.data || error.message);
+    return Promise.reject(error);
+  }
+);
 
 // Auth API
 export const authAPI = {
   checkAuth: () => api.get('/auth/user'),
   logout: () => api.post('/auth/logout'),
   googleLogin: () => {
-    window.location.href = `${API_BASE_URL}/auth/google`;
+    const googleAuthUrl = `${API_BASE_URL}/auth/google`;
+    console.log('🔗 Redirecting to Google OAuth:', googleAuthUrl);
+    window.location.href = googleAuthUrl;
   },
   updatePreferences: (preferences: any) => api.put('/api/user/preferences', preferences),
   getPreferences: () => api.get('/api/user/preferences'),

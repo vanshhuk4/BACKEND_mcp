@@ -26,4 +26,6 @@ export default defineConfig({
     strictPort: true,
     host: true,
   },
+  // Ensure public files are copied to dist
+  publicDir: 'public',
 });

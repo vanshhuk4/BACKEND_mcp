@@ -41,21 +41,11 @@ export const LoginPage: React.FC = () => {
       setIsLoading(true);
       setError('');
       
-      // If your Google login returns user data directly
-      const response = await authAPI.googleLogin();
-      
-      if (response && response.data && response.data.user) {
-        setUser(response.data.user);
-        navigate('/chat');
-      } else {
-        // If Google login redirects to a callback URL, you might not need to navigate here
-        // The redirect will handle the navigation after successful authentication
-        console.log('Google login initiated');
-      }
+      // Redirect to Google OAuth - this will handle the full OAuth flow
+      window.location.href = `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/auth/google`;
     } catch (error: any) {
       console.error('Google login failed:', error);
       setError('Google login failed. Please try again.');
-    } finally {
       setIsLoading(false);
     }
   };

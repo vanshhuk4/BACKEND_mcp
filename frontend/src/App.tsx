@@ -6,12 +6,14 @@ import { ChatLayout } from './components/chat/ChatLayout';
 import { useAuthStore } from './store/authStore';
 
 function App() {
-  const { isAuthenticated, isLoading, setLoading } = useAuthStore();
+  const { isAuthenticated, isLoading, setLoading, setUser } = useAuthStore();
 
   useEffect(() => {
-    // Check for auth errors in URL
+    // Check for auth success/error in URL params (from OAuth callback)
     const urlParams = new URLSearchParams(window.location.search);
     const error = urlParams.get('error');
+    const success = urlParams.get('success');
+    const userData = urlParams.get('user');
     
     if (error) {
       console.error('Auth error:', error);
@@ -19,8 +21,20 @@ function App() {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
     
+    if (success === 'true' && userData) {
+      try {
+        const user = JSON.parse(decodeURIComponent(userData));
+        console.log('✅ OAuth success, setting user:', user);
+        setUser(user);
+        // Clear the success params from URL
+        window.history.replaceState({}, document.title, '/chat');
+      } catch (e) {
+        console.error('Failed to parse user data from URL:', e);
+      }
+    }
+    
     setLoading(false);
-  }, [setLoading]);
+  }, [setLoading, setUser]);
 
   if (isLoading) {
     return (

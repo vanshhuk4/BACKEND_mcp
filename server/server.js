@@ -20,15 +20,17 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/auth/google/callback';
+const GOOGLE_REDIRECT_URL = process.env.GOOGLE_REDIRECT_URL || 'http://localhost:3000/auth/google/callback';
 
-const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI);
-
+const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URL);
+const corsOptions = {
+    origin: process.env.FRONTEND_URL, // This should be your Render frontend URL
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+};
 // Middleware
-app.use(cors({
-    origin: 'http://localhost:5173',
-    credentials: true
-}));
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(session({
     secret: process.env.SESSION_SECRET || 'your-secret-key-here',
@@ -52,6 +54,7 @@ let mcpReady = false;
 let requestId = 1;
 let availableTools = [];
 let pendingResponses = new Map();
+let currentUserId = null;
 
 // Complete list of ALL MCP tools (30+ tools)
 const getAllMCPTools = () => [
@@ -104,17 +107,20 @@ const getAllMCPTools = () => [
     {
         type: "function",
         function: {
-            name: "drive_create_file",
-            description: "Create a new file in Google Drive",
+            // FIX: Renamed to match the Python tool name
+            name: "drive_create",
+            description: "Create a new file in Google Drive. Handles Google Docs, PDFs, and plain text.",
             parameters: {
                 type: "object",
                 properties: {
-                    name: { type: "string", description: "Name of the file to create" },
-                    content: { type: "string", description: "Content of the file" },
-                    mime_type: { type: "string", description: "MIME type of the file" },
-                    folder_id: { type: "string", description: "Parent folder ID (optional)" }
+                    name: { type: "string", description: "Name of the file (e.g., 'My Document')" },
+                    // FIX: Changed mime_type to mimeType to match the Python tool's argument
+                    mimeType: { type: "string", description: "MIME type (e.g., 'application/vnd.google-apps.document', 'text/plain', 'application/pdf')" },
+                    content: { type: "string", description: "The text content for the file." },
+                    folder_id: { type: "string", description: "Optional parent folder ID to create the file in." }
                 },
-                required: ["name", "content"]
+                // FIX: Added mimeType to the required parameters
+                required: ["name", "mimeType", "content"]
             }
         }
     },
@@ -196,7 +202,7 @@ const getAllMCPTools = () => [
             }
         }
     },
-  
+
 
     // Gmail Tools (8 tools)
     {
@@ -642,13 +648,41 @@ const getAllMCPTools = () => [
 ];
 
 // Initialize MCP Server
-function initializeMCP() {
+async function initializeMCP(userId) {
+    if (!userId) {
+        console.error('❌ Cannot start MCP without userId');
+        return;
+    }
+    currentUserId = userId;
+
     const mcpPath = path.join(__dirname, 'mcp_toolkit.py');
+
+    let tokenData;
+    try {
+        tokenData = await AuthToken.findByUserId(userId);
+        if (!tokenData) throw new Error('No auth token found for user');
+    } catch (err) {
+        console.error('❌ Failed to load token from Supabase:', err.message);
+        return;
+    }
+
+    const mcpEnv = {
+        ...process.env,
+        PYTHONUNBUFFERED: '1',
+        GOOGLE_ACCESS_TOKEN: tokenData.access_token,
+        GOOGLE_REFRESH_TOKEN: tokenData.refresh_token,
+        GOOGLE_TOKEN_EXPIRES_AT: new Date(tokenData.expires_at).getTime().toString(),
+        SESSION_USER_ID: userId
+    };
+    console.log('🔐 Starting MCP with tokens:', {
+        access: tokenData.access_token?.substring(0, 5) + '...',
+        refresh: tokenData.refresh_token?.substring(0, 5) + '...',
+        expires: tokenData.expires_at
+    });
     mcpProcess = spawn('python', [mcpPath], {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, PYTHONUNBUFFERED: '1' }
+        env: mcpEnv
     });
-
     let outputBuffer = '';
 
     mcpProcess.stdout.on('data', (data) => {
@@ -687,25 +721,16 @@ function initializeMCP() {
             }
         }
     });
-
-    mcpProcess.stderr.on('data', (data) => {
-        const error = data.toString();
-        if (!error.includes('file_cache') && !error.includes('oauth2client') && !error.includes('WARNING')) {
-            console.error('❌ MCP Error:', error);
-        }
+     mcpProcess.stderr.on('data', (data) => {
+        // This will print any and all messages from Python's stderr stream
+        console.error(`[PYTHON STDERR]: ${data.toString()}`);
     });
+    // --- END OF ADDED BLOCK ---
 
+    // It's also good practice to know if the process closes unexpectedly
     mcpProcess.on('close', (code) => {
-        console.log(`🔄 MCP process exited with code ${code}`);
-        mcpReady = false;
-        setTimeout(() => {
-            console.log('🔄 Attempting to restart MCP server...');
-            initializeMCP();
-        }, 5000);
-    });
-
-    mcpProcess.on('error', (error) => {
-        console.error('❌ MCP Process Error:', error);
+        console.log(`MCP process exited with code ${code}`);
+        mcpProcess = null; // Clear the process variable
         mcpReady = false;
     });
 
@@ -713,17 +738,6 @@ function initializeMCP() {
         initializeMCPHandshake();
     }, 2000);
 }
-
-function restartMCP() {
-    console.log('♻️ Restarting MCP due to updated credentials...');
-    if (mcpProcess) {
-        mcpProcess.kill();
-    }
-    setTimeout(() => {
-        initializeMCP();
-    }, 1000);
-}
-
 async function initializeMCPHandshake() {
     try {
         console.log('🤝 Starting MCP handshake...');
@@ -749,6 +763,9 @@ async function initializeMCPHandshake() {
 
     } catch (error) {
         console.error('❌ MCP Handshake failed:', error);
+        setTimeout(() => {
+            initializeMCPHandshake();
+        }, 5000);
     }
 }
 
@@ -846,11 +863,6 @@ async function callMCPTool(toolName, params) {
     try {
         console.log(`🔧 Calling MCP tool: ${toolName}`, params);
 
-        if (!mcpReady) {
-            // Provide demo responses when MCP is not ready
-            return getDemoToolResponse(toolName, params);
-        }
-
         const result = await sendMCPRequest('tools/call', {
             name: toolName,
             arguments: params
@@ -873,8 +885,8 @@ async function callMCPTool(toolName, params) {
         }
     } catch (error) {
         console.error(`❌ Error calling tool ${toolName}:`, error);
-        // Fallback to demo response on error
-        return getDemoToolResponse(toolName, params);
+
+        return `Error: The tool '${toolName}' failed to execute. Reason: ${error.message}`;
     }
 }
 
@@ -884,9 +896,9 @@ function getDemoToolResponse(toolName, params) {
         'drive_search': `Demo: Found 3 files matching "${params.query}": Document1.docx, Spreadsheet1.xlsx, Presentation1.pptx`,
         'drive_list_files': 'Demo: Listed 10 files from Google Drive: file1.pdf, file2.docx, file3.xlsx...',
         'drive_read_file': `Demo: Reading file content for ${params.file_id}. Content: "This is sample file content..."`,
-        'drive_create_file': `Demo: Created file "${params.name}" successfully. File ID: demo_file_123`,
+        'drive_create': `Demo: Created file "${params.name}" successfully. File ID: demo_file_123`,
         'drive_update_file': `Demo: Updated file ${params.file_id} with new content`,
-        'drive_delete_file': `Demo: Deleted file ${params.file_id} successfully`,
+        'drive_delete': `Demo: Deleted file ${params.file_id} successfully`,
         'drive_share_file': `Demo: Shared file ${params.file_id} with ${params.email} as ${params.role}`,
         'drive_upload_file': `Demo: Uploaded file from ${params.file_path} to Google Drive`,
         'drive_create_folder': `Demo: Created folder "${params.name}" successfully`,
@@ -970,7 +982,7 @@ app.get('/auth/google/callback', async (req, res) => {
 
         if (!code) {
             console.error('No authorization code received');
-            return res.redirect('http://localhost:5173/login?error=no_code');
+            return res.redirect(`${process.env.FRONTEND_URL}/login?error=no_code`);
         }
 
         console.log('🔐 Processing Google OAuth callback...');
@@ -1043,17 +1055,20 @@ app.get('/auth/google/callback', async (req, res) => {
         req.session.tokens = tokens;
 
         console.log('💾 User session created successfully');
+        try {
+            await initializeMCP(user.id);
+            console.log("done done")
+        }catch(error){
+            console.log("error aagyi re")
+        }
 
-        // Save OAuth tokens for MCP toolkit
-        await fs.writeFile(path.join(__dirname, 'token.json'), JSON.stringify(tokens, null, 2));
-        restartMCP();
 
         console.log('🔄 Redirecting to chat interface...');
-        res.redirect('http://localhost:5173/chat');
+        res.redirect(`${process.env.FRONTEND_URL}/chat`);
 
     } catch (error) {
         console.error('❌ Google OAuth callback error:', error);
-        res.redirect('http://localhost:5173/login?error=auth_failed');
+        res.redirect(`${process.env.FRONTEND_URL}/login?error=auth_failed`);
     }
 });
 
@@ -1269,15 +1284,23 @@ Always think step-by-step and use multiple tools when needed to fully complete t
         // Parse enabled tools
         let parsedEnabledTools = [];
         try {
-            parsedEnabledTools = JSON.parse(enabledTools);
+            const enabledToolsString = req.body.enabledTools || '[]';
+            parsedEnabledTools = JSON.parse(enabledToolsString);
         } catch (e) {
             console.warn('Failed to parse enabled tools:', e);
+            parsedEnabledTools = [];
+        }
+        const allPossibleTools = availableTools;
+        let filteredTools;
+        if (parsedEnabledTools.length > 0) {
+            // If the user has specific tools enabled, filter the master list
+            const enabledToolNames = new Set(parsedEnabledTools);
+            filteredTools = allPossibleTools.filter(tool => enabledToolNames.has(tool.function.name));
+        } else {
+            // If no preferences are set, use ALL tools defined in the master list
+            filteredTools = allPossibleTools;
         }
 
-        // Filter available tools based on enabled tools from user preferences
-        const filteredTools = parsedEnabledTools.length > 0
-            ? availableTools.filter(tool => parsedEnabledTools.includes(tool.function.name))
-            : availableTools;
 
         console.log(`🛠️ Using ${filteredTools.length} tools for model ${model}:`, filteredTools.map(t => t.function.name));
 
@@ -1344,7 +1367,7 @@ Always think step-by-step and use multiple tools when needed to fully complete t
             }
 
             // Get final response
-           const finalCompletion = await openai.chat.completions.create({
+            const finalCompletion = await openai.chat.completions.create({
                 model: model,
                 messages: messages,
                 tools: filteredTools,
@@ -1644,10 +1667,7 @@ app.listen(PORT, async () => {
     console.log(`✅ Initialized ${availableTools.length} MCP tools`);
 
     // Initialize MCP server
-    setTimeout(() => {
-        console.log('🔧 Initializing MCP server...');
-        initializeMCP();
-    }, 1000);
+    console.log('🟡 Skipping MCP startup — will initialize after user login');
 });
 
 // Graceful shutdown

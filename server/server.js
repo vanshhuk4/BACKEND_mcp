@@ -275,9 +275,9 @@ app.get('/auth/google/callback', async (req, res) => {
       expires_at: expiresAt.toISOString()
     });
 
-    // Redirect to frontend with success
-    const userParam = encodeURIComponent(JSON.stringify(req.session.user));
-    res.redirect(`${process.env.FRONTEND_URL}/chat?success=true&user=${userParam}`);
+    // Redirect to frontend
+    console.log('🔄 Redirecting to frontend...');
+    res.redirect(`${process.env.FRONTEND_URL}/chat`);
 
   } catch (error) {
     console.error('❌ OAuth callback error:', error);

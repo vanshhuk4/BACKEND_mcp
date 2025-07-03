@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Send, Paperclip, Settings, X, FileText, Image, File } from 'lucide-react';
+import { Send, Paperclip, Settings, X, FileText, Image, File, AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { ToolsPanel } from './ToolsPanel';
 import { ModelSelector } from './ModelSelector';
 import { useChatStore } from '../../store/chatStore';
 import { useAuthStore } from '../../store/authStore';
-import { chatAPI } from '../../services/api';
+import { chatAPI, healthAPI } from '../../services/api';
 
 interface Message {
   id: string;
@@ -40,6 +40,8 @@ export const ChatInterface: React.FC = () => {
   const [attachments, setAttachments] = useState<AttachmentPreview[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
+  const [mcpStatus, setMcpStatus] = useState<{ ready: boolean; error?: string }>({ ready: false });
+  const [showMcpWarning, setShowMcpWarning] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -51,6 +53,38 @@ export const ChatInterface: React.FC = () => {
     refreshChats
   } = useChatStore();
   const { user } = useAuthStore();
+
+  // Check MCP status on component mount
+  useEffect(() => {
+    checkMCPStatus();
+    const interval = setInterval(checkMCPStatus, 30000); // Check every 30 seconds
+    return () => clearInterval(interval);
+  }, []);
+
+  const checkMCPStatus = async () => {
+    try {
+      const response = await healthAPI.getMCPStatus();
+      setMcpStatus({ ready: response.data.ready });
+      setShowMcpWarning(!response.data.ready);
+    } catch (error) {
+      console.error('Failed to check MCP status:', error);
+      setMcpStatus({ ready: false, error: 'Failed to connect to MCP server' });
+      setShowMcpWarning(true);
+    }
+  };
+
+  const restartMCP = async () => {
+    try {
+      setLoading(true);
+      await healthAPI.restartMCP();
+      // Wait a bit then check status
+      setTimeout(checkMCPStatus, 3000);
+    } catch (error) {
+      console.error('Failed to restart MCP:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Load chat messages when chatId changes
   useEffect(() => {
@@ -185,12 +219,12 @@ export const ChatInterface: React.FC = () => {
       
       // Clear attachments after successful send
       setAttachments([]);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to send message:', error);
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: 'Sorry, I encountered an error. Please try again.',
+        content: `Sorry, I encountered an error: ${error.message || 'Please try again.'}`,
         created_at: new Date().toISOString(),
       };
       setMessages(prev => [...prev, errorMessage]);
@@ -230,6 +264,20 @@ export const ChatInterface: React.FC = () => {
           <ModelSelector />
         </div>
         <div className="flex items-center space-x-2">
+          {showMcpWarning && (
+            <div className="flex items-center space-x-2 text-amber-600 bg-amber-50 px-3 py-1 rounded-lg">
+              <AlertCircle className="w-4 h-4" />
+              <span className="text-sm">MCP Server Not Ready</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={restartMCP}
+                className="text-amber-600 hover:text-amber-700"
+              >
+                <RefreshCw className="w-3 h-3" />
+              </Button>
+            </div>
+          )}
           <Button 
             variant="ghost" 
             size="sm" 
@@ -266,6 +314,28 @@ export const ChatInterface: React.FC = () => {
                     <strong>💾 Google Drive:</strong> Search files, create documents, share content
                   </div>
                 </div>
+                
+                {showMcpWarning && (
+                  <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                    <div className="flex items-center space-x-2 text-amber-800">
+                      <AlertCircle className="w-5 h-5" />
+                      <span className="font-medium">MCP Server Status</span>
+                    </div>
+                    <p className="text-amber-700 text-sm mt-2">
+                      The MCP server is initializing. Google Workspace tools may not be available yet.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={restartMCP}
+                      className="mt-3 text-amber-700 border-amber-300 hover:bg-amber-100"
+                      loading={loading}
+                    >
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      Restart MCP Server
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
           ) : (

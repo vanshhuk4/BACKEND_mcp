@@ -25,7 +25,7 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor for debugging
+// Response interceptor for debugging and error handling
 api.interceptors.response.use(
   (response) => {
     console.log(`✅ API Response: ${response.status} ${response.config.url}`);
@@ -33,6 +33,20 @@ api.interceptors.response.use(
   },
   (error) => {
     console.error('❌ API Response Error:', error.response?.status, error.response?.data || error.message);
+    
+    // Handle specific error cases
+    if (!error.response) {
+      // Network error
+      error.code = 'NETWORK_ERROR';
+      error.message = 'Unable to connect to server. Please check your internet connection.';
+    } else if (error.response.status === 401) {
+      // Unauthorized - session expired
+      error.message = 'Your session has expired. Please log in again.';
+    } else if (error.response.status >= 500) {
+      // Server error
+      error.message = 'Server error. Please try again later.';
+    }
+    
     return Promise.reject(error);
   }
 );
@@ -59,6 +73,7 @@ export const chatAPI = {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      timeout: 60000, // 60 seconds for file uploads
     });
   },
   getChat: (chatId: string) => api.get(`/api/chat/${chatId}`),
@@ -76,6 +91,8 @@ export const toolsAPI = {
 // Health API
 export const healthAPI = {
   getStatus: () => api.get('/api/health'),
+  getMCPStatus: () => api.get('/api/mcp/status'),
+  restartMCP: () => api.post('/api/mcp/restart'),
 };
 
 // Attachments API
